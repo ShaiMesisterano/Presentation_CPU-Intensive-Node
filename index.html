@@ -1,0 +1,318 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+    <title>CPU Intensive Tasks In Node.js</title>
+
+    <link rel="stylesheet" href="css/reset.css">
+    <link rel="stylesheet" href="css/reveal.css">
+    <link rel="stylesheet" href="css/theme/black.css">
+
+    <!-- Theme used for syntax highlighting of code -->
+    <link rel="stylesheet" href="lib/css/monokai.css">
+    <!-- Custom Styling -->
+    <style>
+        .columns {
+            display: flex;
+            align-items: flex-start;
+        }
+
+        .column {
+            flex: 1;
+        }
+    </style>
+
+    <!-- Printing and PDF exports -->
+    <script>
+		var link = document.createElement('link');
+		link.rel = 'stylesheet';
+		link.type = 'text/css';
+		link.href = window.location.search.match(/print-pdf/gi) ? 'css/print/pdf.css' : 'css/print/paper.css';
+		document.getElementsByTagName('head')[0].appendChild(link);
+    </script>
+</head>
+<body>
+<div class="reveal">
+    <div class="slides">
+        <section>
+            <h2>CPU Intensive Node</h2>
+            <h2>---</h2>
+            <h3>Shai Mesisterano</h3>
+            <h5>Full Stack Consultant</h5>
+        </section>
+        <section>
+            <p>Boss: <b>I wanna give you some task...</b></p>
+            <p class="fragment">You:</p>
+            <img class="fragment" data-src="assets/bring-it-on.gif">
+        </section>
+        <section>
+            <h2>And Then...</h2>
+            <div class="columns">
+                <div class="column">
+                    <ul>
+                        <li class="fragment">Write code</li>
+                        <li class="fragment">Perform manual tests</li>
+                        <li class="fragment">Fix bugs</li>
+                        <li class="fragment">Write Unit Tests</li>
+                        <li class="fragment">Fix more bugs</li>
+                        <li class="fragment">Write integration tests</li>
+                    </ul>
+                </div>
+                <div class="column">
+                    <ul>
+                        <li class="fragment">Deploy to QA</li>
+                        <li class="fragment">🐞🐞🐞</li>
+                        <li class="fragment">Deploy to stage</li>
+                        <li class="fragment">Deploy to prodution</li>
+                        <li class="fragment">Customer complaints</li>
+                        <li class="fragment">Bugs!</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+        <section>
+            <h2>2 Weeks Later...</h2>
+            <img class="fragment" data-src="assets/exhausted.gif">
+        </section>
+        <section>
+            <h3>Node.js Can Be Exhausted Too</h3>
+            <img data-src="assets/event-loop.jpg">
+            <aside class="notes">One process, one thread, one event-loop</aside>
+            <aside class="notes">responsible for Javascript callbacks and non-blocking I/O</aside>
+            <aside class="notes">mechanism that takes callbacks (functions) and registers them to be executed at some
+                point in the future
+            </aside>
+            <aside class="notes">When a Javascript operation blocks the thread, the event loop is blocked as well
+            </aside>
+        </section>
+        <section>
+            <h2>Node Operation Types</h2>
+            <ul>
+                <li class="fragment">I/O-Bound</li>
+                <aside class="notes">Great async I/O</aside>
+                <aside class="notes">Small number of threads</aside>
+                <aside class="notes">Fewer threads - less memory allocation and context-switching</aside>
+                <li class="fragment">CPU-Bound</li>
+                <aside class="notes">Examples: Crypto: crypto.pbkdf2(), crypto.scrypt(), crypto.randomBytes(),
+                    crypto.randomFill(), crypto.generateKeyPair(). Zlib: All zlib APIs except those that are explicitly
+                    synchronous use libuv's threadpool
+                </aside>
+            </ul>
+        </section>
+        <section>
+            <h2>CPU-Intensive Operations</h2>
+            <ul>
+                <li class="fragment">Block the event loop</li>
+                <li class="fragment">Other tasks have to wait</li>
+                <li class="fragment">Additional requests cannot be handled</li>
+                <li class="fragment">Keep-Alive requests wouldn't get a response</li>
+                <li class="fragment">Examples: Image Processing, Video Compression, Cryptography, Statistics</li>
+            </ul>
+        </section>
+        <section>
+            <h2>Blocking The Event Loop</h2>
+            <p class="fragment">
+                "Blocked" - long time to execute a callback (Event Loop) or a task (Worker)
+                <aside class="notes">
+                    "Blocked" cannot handle requests from any other clients
+                </aside>
+                <aside class="notes">
+                    Fair treatment of clients - responsibility of your application
+                </aside>
+                <aside class="notes">
+                    You shouldn't do too much work for any client in any single callback or task
+                </aside>
+                <aside class="notes">
+                    It’s all good until there’s a need to synchronously execute some complex operation: any function that takes too long to run will block the thread. If an application has many such functions, it could significantly decrease the throughput of the server or freeze it altogether. In this case, there’s no way of delegating the work to the worker pool.
+                </aside>
+            </p>
+        </section>
+        <section>
+            <h2>Why Promises Are Not Enough?</h2>
+            <aside class="notes">
+                each callback should complete quickly. Applies also to await's
+            </aside>
+        </section>
+        <section>
+            <h1>Solutions</h1>
+        </section>
+        <section>
+            <h2>Partitioning</h2>
+            <aside class="notes">Mention SCRUM</aside>
+            <ul>
+                <li class="fragment">Partial calculation</li>
+                <li class="fragment">Transfer back to the Event Loop</li>
+                <li class="fragment">Will take longer</li>
+                <li class="fragment">Not included in packages</li>
+                <li class="fragment">Hard to read/explain/debug</li>
+            </ul>
+        </section>
+        <section>
+            <h3><code>partitioned.js</code></h3>
+            <pre>
+            <code class="hljs">
+function asyncAvg(n, avgCB) {
+	let sum = 0;
+
+	function help(i, cb) {
+		sum += i;
+		if (i === n) {
+			cb(sum);
+			return;
+		}
+
+		setImmediate(help.bind(null, i + 1, cb));
+	}
+
+	help(1, function (sum) {
+		const avg = sum / n;
+		avgCB(avg);
+	});
+}
+
+// execution
+const n = 3;
+asyncAvg(n, function (avg) {
+	console.log(&apos;avg of 1-n: &apos; + avg);
+});
+            </code>
+            </pre>
+        </section>
+        <section>
+            <h2>Offloading</h2>
+            <img src="assets/bus.jpg"/>
+        </section>
+        <section>
+            <h2>Offloading</h2>
+            <ul>
+                <li class="fragment">Benefit from multiple cores</li>
+                <li class="fragment">Free the Event Loop</li>
+                <li class="fragment">Move the work onto a Worker Pool</li>
+                <aside class="notes">Refer to the large task - offload to another team/developer</aside>
+            </ul>
+        </section>
+        <section>
+            <h2>Offloading Using Core Modules</h2>
+            <ul>
+                <aside class="notes">create and manage your own Worker Pool dedicated to computation rather than Node's
+                    I/O-themed Worker Pool
+                </aside>
+                <li class="fragment"><code>require('cluster')</code></li>
+                <li class="fragment"><code>require('child_process')</code></li>
+                <li class="fragment"><code>require('worker_threads')</code></li>
+            </ul>
+        </section>
+        <section>
+            <h3><code>require('cluster')</code></h3>
+            <ul>
+                <li class="fragment">Create multiple node instances</li>
+                <li class="fragment">Master/slave approach</li>
+                <li class="fragment">Route between incoming requests</li>
+                <li class="fragment">Create a new process. Not a thread</li>
+            </ul>
+        </section>
+        <section>
+            <h3><code>cluster.js</code></h3>
+            <pre>
+            <code class="hljs">
+const cluster = require(&#39;cluster&#39;);
+const os = require(&#39;os&#39;);
+if (cluster.isMaster) {
+    const cpus = os.cpus().length;
+    for (let i=0; i&lt;cpus;i++){
+        cluster.fork();
+    }
+}
+else {
+    require(&#39;./server&#39;);
+}
+            </code>
+            </pre>
+        </section>
+        <section>
+            <h3><code>server.js</code></h3>
+            <pre>
+            <code class="hljs">
+const http = require(&#39;http&#39;);
+const pid = process.pid;
+http.createServer( (req, res) =&gt; {
+    for (let i=0; i&lt;10000000; i++);
+    // BLOCKED
+    res.end(&#96;Handled by process ${pid}&#96;);
+}).listen(8000, () =&gt; console.log(&#96;Started process ${pid}&#96;));
+            </code>
+            </pre>
+        </section>
+        <section>
+            <h3><code>require('child_process')</code></h3>
+            <ul>
+                <li class="fragment">fork/spawn process</li>
+                <li class="fragment">Not only Javascript</li>
+                <li class="fragment">Different process ID</li>
+                <li class="fragment">Need to serialize big payloads of data</li>
+                <aside class="notes">You should not simply create a Child Process for every client. You can receive client requests more quickly than you can create and manage children, and your server might become a fork bomb
+                </aside>
+            </ul>
+        </section>
+        <section>
+            <h3><code>require('worker_threads')</code></h3>
+            <ul>
+                <li class="fragment"><code>&lt; 11.7 &gt; 10.5 (experimental)</code></li>
+                <li class="fragment"><code>&gt; 11.7 (official)</code></li>
+                <li class="fragment">Lightweight and share the same process ID as their parent threads</li>
+                <li class="fragment">Share memory with parent threads</li>
+                <li class="fragment">Avoid serializing</li>
+                <li class="fragment">Spawn only Javascript</li>
+            </ul>
+        </section>
+        <section>
+            <h2>Demo</h2>
+            <img src="assets/greyscale.png"/>
+        </section>
+        <section><h1>Summary</h1></section>
+        <section>
+            <h2>Node's Step Brother</h2>
+            <ul>
+                <li class="fragment">Designed originally for browser UI</li>
+                <li class="fragment">Supporting thread-oriented features would require changing the entire language</li>
+                <li class="fragment">Compatibility comes first (Web Worker)</li>
+            </ul>
+        </section>
+        <section>
+            <h1>Javascript Is A Product</h1>
+        </section>
+        <section>
+            <h1>AI</h1>
+            <img src="assets/ai.gif">
+        </section>
+        <section>
+            <h1>Machine Learning</h1>
+            <img src="assets/machine-learning.png">
+        </section>
+        <section>
+            <h2>Thank You!</h2>
+            <h4>Shai Mesisterano</h4>
+            <h5>shai@MCterano.com</h5>
+        </section>
+    </div>
+</div>
+
+<script src="js/reveal.js"></script>
+
+<script>
+	// More info about config & dependencies:
+	// - https://github.com/hakimel/reveal.js#configuration
+	// - https://github.com/hakimel/reveal.js#dependencies
+	Reveal.initialize({
+		dependencies: [
+			{src: 'plugin/markdown/marked.js'},
+			{src: 'plugin/markdown/markdown.js'},
+			{src: 'plugin/notes/notes.js', async: true},
+			{src: 'plugin/highlight/highlight.js', async: true}
+		]
+	});
+</script>
+</body>
+</html>
